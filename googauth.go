@@ -48,8 +48,14 @@ func ComputeCode(secret string, value int64) int {
 	return int(code)
 }
 
-// ErrInvalidCode indicate the supplied one-time code was not valid
-var ErrInvalidCode = errors.New("invalid code")
+// ErrInvalidCodeFormat indicate the supplied one-time code was not valid
+var ErrInvalidCodeFormat = errors.New("invalid code")
+
+// ErrWrongCode indicate the supplied one-time code was wrong
+var ErrWrongCode = errors.New("wrong code")
+
+// ErrReusedCode indicate the supplied one-time be used before
+var ErrReusedCode = errors.New("used code")
 
 // OTPConfig is a one-time-password configuration.  This object will be modified by calls to
 // Authenticate and should be saved to ensure the codes are in fact only used
@@ -59,23 +65,7 @@ type OTPConfig struct {
 	WindowSize    int    // valid range: technically 0..100 or so, but beyond 3-5 is probably bad security
 	HotpCounter   int    // the current otp counter.  0 if the user uses time-based codes instead.
 	DisallowReuse []int  // timestamps in the current window unavailable for re-use
-	ScratchCodes  []int  // an array of 8-digit numeric codes that can be used to log in
 	UTC           bool   // use UTC for the timestamp instead of local time
-}
-
-func (c *OTPConfig) checkScratchCodes(code int) bool {
-
-	for i, v := range c.ScratchCodes {
-		if code == v {
-			// remove this code from the list of valid ones
-			l := len(c.ScratchCodes) - 1
-			c.ScratchCodes[i] = c.ScratchCodes[l] // copy last element over this element
-			c.ScratchCodes = c.ScratchCodes[0:l]  // and trim the list length by 1
-			return true
-		}
-	}
-
-	return false
 }
 
 func (c *OTPConfig) checkHotpCode(code int) bool {
@@ -95,7 +85,7 @@ func (c *OTPConfig) checkHotpCode(code int) bool {
 	return false
 }
 
-func (c *OTPConfig) checkTotpCode(t0, code int) bool {
+func (c *OTPConfig) checkTotpCode(t0, code int) (bool, error) {
 
 	minT := t0 - (c.WindowSize / 2)
 	maxT := t0 + (c.WindowSize / 2)
@@ -105,7 +95,7 @@ func (c *OTPConfig) checkTotpCode(t0, code int) bool {
 			if c.DisallowReuse != nil {
 				for _, timeCode := range c.DisallowReuse {
 					if timeCode == t {
-						return false
+						return false, ErrReusedCode
 					}
 				}
 
@@ -122,38 +112,59 @@ func (c *OTPConfig) checkTotpCode(t0, code int) bool {
 				c.DisallowReuse = c.DisallowReuse[min:]
 			}
 
-			return true
+			return true, nil
 		}
 	}
 
-	return false
+	return false, ErrWrongCode
 }
 
 // Authenticate a one-time-password against the given OTPConfig
 // Returns true/false if the authentication was successful.
 // Returns error if the password is incorrectly formatted (not a zero-padded 6 or non-zero-padded 8 digit number).
-func (c *OTPConfig) Authenticate(password string) (bool, error) {
-
-	var scratch bool
-
+func (c *OTPConfig) Authenticate(password string) bool {
 	switch {
 	case len(password) == 6 && password[0] >= '0' && password[0] <= '9':
 		break
-	case len(password) == 8 && password[0] >= '1' && password[0] <= '9':
-		scratch = true
-		break
 	default:
-		return false, ErrInvalidCode
+		return false
 	}
 
 	code, err := strconv.Atoi(password)
 
 	if err != nil {
-		return false, ErrInvalidCode
+		return false
 	}
 
-	if scratch {
-		return c.checkScratchCodes(code), nil
+	// we have a counter value we can use
+	if c.HotpCounter > 0 {
+		return c.checkHotpCode(code)
+	}
+
+	var t0 int
+	// assume we're on Time-based OTP
+	if c.UTC {
+		t0 = int(time.Now().UTC().Unix() / 30)
+	} else {
+		t0 = int(time.Now().Unix() / 30)
+	}
+	ok, _ := c.checkTotpCode(t0, code)
+	return ok
+}
+
+// AuthenticateVv verbose version of Authenticate
+func (c *OTPConfig) AuthenticateVv(password string) (bool, error) {
+	switch {
+	case len(password) == 6 && password[0] >= '0' && password[0] <= '9':
+		break
+	default:
+		return false, ErrInvalidCodeFormat
+	}
+
+	code, err := strconv.Atoi(password)
+
+	if err != nil {
+		return false, ErrInvalidCodeFormat
 	}
 
 	// we have a counter value we can use
@@ -168,7 +179,7 @@ func (c *OTPConfig) Authenticate(password string) (bool, error) {
 	} else {
 		t0 = int(time.Now().Unix() / 30)
 	}
-	return c.checkTotpCode(t0, code), nil
+	return c.checkTotpCode(t0, code)
 }
 
 // ProvisionURI generates a URI that can be turned into a QR code to configure

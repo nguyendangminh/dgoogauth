@@ -32,32 +32,6 @@ func TestCode(t *testing.T) {
 	}
 }
 
-func TestScratchCode(t *testing.T) {
-
-	var cotp OTPConfig
-
-	cotp.ScratchCodes = []int{11112222, 22223333}
-
-	var scratchTests = []struct {
-		code   int
-		result bool
-	}{
-		{33334444, false},
-		{11112222, true},
-		{11112222, false},
-		{22223333, true},
-		{22223333, false},
-		{33334444, false},
-	}
-
-	for _, s := range scratchTests {
-		r := cotp.checkScratchCodes(s.code)
-		if r != s.result {
-			t.Errorf("scratchcode(%d) failed: got %t expected %t", s.code, r, s.result)
-		}
-	}
-}
-
 func TestHotpCode(t *testing.T) {
 
 	var cotp OTPConfig
@@ -115,7 +89,7 @@ func TestTotpCode(t *testing.T) {
 	}
 
 	for i, s := range windowTest {
-		r := cotp.checkTotpCode(s.t0, s.code)
+		r, _ := cotp.checkTotpCode(s.t0, s.code)
 		if r != s.result {
 			t.Errorf("counterCode(%d) (step %d) failed: got %t expected %t", s.code, i, r, s.result)
 		}
@@ -137,7 +111,7 @@ func TestTotpCode(t *testing.T) {
 	}
 
 	for i, s := range noreuseTest {
-		r := cotp.checkTotpCode(s.t0, s.code)
+		r, _ := cotp.checkTotpCode(s.t0, s.code)
 		if r != s.result {
 			t.Errorf("timeCode(%d) (step %d) failed: got %t expected %t", s.code, i, r, s.result)
 		}
@@ -160,10 +134,9 @@ func TestTotpCode(t *testing.T) {
 func TestAuthenticate(t *testing.T) {
 
 	otpconf := &OTPConfig{
-		Secret:       "2SH3V3GDW7ZNMGYE",
-		WindowSize:   3,
-		HotpCounter:  1,
-		ScratchCodes: []int{11112222, 22223333},
+		Secret:      "2SH3V3GDW7ZNMGYE",
+		WindowSize:  3,
+		HotpCounter: 1,
 	}
 
 	type attempt struct {
@@ -178,12 +151,12 @@ func TestAuthenticate(t *testing.T) {
 		{ /* 1 */ "293240", true},  // hopt increments on success
 		{ /* 1 */ "293240", false}, // hopt failure
 		{"33334444", false},        // scratch
-		{"11112222", true},
+		{"11112222", false},
 		{"11112222", false},
 	}
 
 	for _, a := range attempts {
-		r, _ := otpconf.Authenticate(a.code)
+		r := otpconf.Authenticate(a.code)
 		if r != a.result {
 			t.Errorf("bad result from code=%s: got %t expected %t\n", a.code, r, a.result)
 		}
@@ -207,13 +180,13 @@ func TestAuthenticate(t *testing.T) {
 	}
 
 	for _, a := range attempts {
-		r, _ := otpconf.Authenticate(a.code)
+		r := otpconf.Authenticate(a.code)
 		if r != a.result {
 			t.Errorf("bad result from code=%s: got %t expected %t\n", a.code, r, a.result)
 		}
 
 		otpconf.UTC = true
-		r, _ = otpconf.Authenticate(a.code)
+		r = otpconf.Authenticate(a.code)
 		if r != a.result {
 			t.Errorf("bad result from code=%s: got %t expected %t\n", a.code, r, a.result)
 		}
